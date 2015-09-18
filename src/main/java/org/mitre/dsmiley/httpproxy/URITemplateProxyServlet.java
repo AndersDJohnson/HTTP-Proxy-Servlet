@@ -45,7 +45,7 @@ public class URITemplateProxyServlet extends ProxyServlet {
 
   @Override
   protected void initTarget() throws ServletException {
-    targetUriTemplate = getConfigParam(P_TARGET_URI);
+    targetUriTemplate = servletHelper.getConfigParam(P_TARGET_URI);
     if (targetUriTemplate == null)
       throw new ServletException(P_TARGET_URI+" is required.");
 

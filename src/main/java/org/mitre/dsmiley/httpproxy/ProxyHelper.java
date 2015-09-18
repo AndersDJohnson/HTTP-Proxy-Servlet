@@ -1,10 +1,12 @@
 package org.mitre.dsmiley.httpproxy;
 
+import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
 import org.apache.http.client.utils.URIUtils;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.message.BasicHeader;
@@ -13,11 +15,15 @@ import org.apache.http.message.BasicHttpRequest;
 import org.apache.http.message.HeaderGroup;
 import org.apache.http.util.EntityUtils;
 
+import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Enumeration;
+import java.util.List;
 
 /**
  *
@@ -126,6 +132,21 @@ public class ProxyHelper {
     }
   }
 
+  /** Copy proxied response headers back to the servlet client. */
+  protected void copyResponseHeaders(HttpResponse proxyResponse, HttpServletRequest servletRequest,
+                                     HttpServletResponse servletResponse) {
+    for (Header header : proxyResponse.getAllHeaders()) {
+      if (hopByHopHeaders.containsHeader(header.getName()))
+        continue;
+      if (header.getName().equalsIgnoreCase(org.apache.http.cookie.SM.SET_COOKIE) ||
+          header.getName().equalsIgnoreCase(org.apache.http.cookie.SM.SET_COOKIE2)) {
+        copyProxyCookie(servletRequest, servletResponse, header);
+      } else {
+        servletResponse.addHeader(header.getName(), header.getValue());
+      }
+    }
+  }
+
   private void setXForwardedForHeader(HttpServletRequest servletRequest,
                                       HttpRequest proxyRequest) {
     String headerName = "X-Forwarded-For";
@@ -139,6 +160,28 @@ public class ProxyHelper {
     }
   }
 
+  /** Copy cookie from the proxy to the servlet client.
+   *  Replaces cookie path to local path and renames cookie to avoid collisions.
+   */
+  protected void copyProxyCookie(HttpServletRequest servletRequest,
+                                 HttpServletResponse servletResponse, Header header) {
+    List<HttpCookie> cookies = HttpCookie.parse(header.getValue());
+    String path = servletRequest.getContextPath(); // path starts with / or is empty string
+    path += servletRequest.getServletPath(); // servlet path starts with / or is empty string
+
+    for (HttpCookie cookie : cookies) {
+      //set cookie name prefixed w/ a proxy value so it won't collide w/ other cookies
+      String proxyCookieName = getCookieNamePrefix() + cookie.getName();
+      Cookie servletCookie = new Cookie(proxyCookieName, cookie.getValue());
+      servletCookie.setComment(cookie.getComment());
+      servletCookie.setMaxAge((int) cookie.getMaxAge());
+      servletCookie.setPath(path); //set to the path of the proxy servlet
+      // don't set cookie domain
+      servletCookie.setSecure(cookie.getSecure());
+      servletCookie.setVersion(cookie.getVersion());
+      servletResponse.addCookie(servletCookie);
+    }
+  }
 
   /**
    * Take any client cookies that were originally from the proxy and prepare them to send to the
